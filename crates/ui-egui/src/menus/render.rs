@@ -51,7 +51,8 @@ pub(super) fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: u
         if it.path.len() == depth {
             if it.label == "---" {
                 if !last_was_sep && i + 1 < items.len() {
-                    ui.add(egui::Separator::default().spacing(MENU_SEPARATOR));
+                    let sep = ui.add(egui::Separator::default().spacing(MENU_SEPARATOR));
+                    nav.separator(depth - 1, &sep);
                     last_was_sep = true;
                 }
                 continue;
