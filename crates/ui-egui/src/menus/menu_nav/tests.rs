@@ -1272,3 +1272,44 @@ fn leaving_a_submenu_for_another_row_doesnt_light_its_row() {
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+/// Moves the pointer to `p` and runs a frame, as the other pointer tests do.
+fn move_pointer(h: &mut Harness<'static, PhotocraftApp>, p: egui::Pos2) {
+    h.event(egui::Event::PointerMoved(p));
+    h.run_steps(1);
+}
+
+/// The pointer on a separator takes the highlight off the row it came from, whichever side that
+/// is, as in native menus; the next row it reaches takes it. Before, the row stayed lit until the
+/// pointer reached another row.
+#[test]
+fn a_separator_takes_the_highlight_off_whichever_row_was_lit() {
+    let mut h = harness((1280.0, 720.0, 1.0));
+    let mut checked = 0;
+    for top in ["File", "Edit", "Select", "View", "Window"] {
+        open(&mut h, top);
+        let row_list = rows(&h, 0);
+        // Two neighbouring rows, both on screen, with a separator's gap between them.
+        let gap = (1..row_list.len()).find(|&i| visible(&h, 0, i - 1) && visible(&h, 0, i) && row_list[i].rect.top() - row_list[i - 1].rect.bottom() > 4.0);
+        if let Some(i) = gap {
+            let (above, below) = (&row_list[i - 1], &row_list[i]);
+            let on_separator = egui::pos2(above.rect.center().x, (above.rect.bottom() + below.rect.top()) / 2.0);
+            let lit = |h: &Harness<'static, PhotocraftApp>| Nav::current(&h.ctx).highlighted(0);
+            // Down: from the row above, over the separator, onto the row below.
+            move_pointer(&mut h, above.rect.center());
+            assert_eq!(lit(&h), Some(i - 1), "{top}: the pointer on the row above lights it");
+            move_pointer(&mut h, on_separator);
+            assert_eq!(lit(&h), None, "{top}: coming from above, the separator takes the highlight off");
+            move_pointer(&mut h, below.rect.center());
+            assert_eq!(lit(&h), Some(i), "{top}: the row below takes it");
+            // And back up: from the row below, over the separator, onto the row above.
+            move_pointer(&mut h, on_separator);
+            assert_eq!(lit(&h), None, "{top}: coming from below, the separator takes the highlight off");
+            move_pointer(&mut h, above.rect.center());
+            assert_eq!(lit(&h), Some(i - 1), "{top}: the row above takes it again");
+            checked += 1;
+        }
+        key(&mut h, egui::Key::Escape);
+    }
+    assert!(checked > 0, "some menu has a separator between two visible rows");
+}

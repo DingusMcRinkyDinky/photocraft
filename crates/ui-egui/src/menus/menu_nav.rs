@@ -349,6 +349,30 @@ impl Nav {
         }
     }
 
+    /// Call with the response of a separator drawn in `level`. A separator is not a row, so nothing
+    /// else takes the highlight when the pointer moves onto it, and the last row would stay lit (a
+    /// native menu clears it). Leaves the highlight alone while a submenu is held open for the
+    /// pointer heading to it, since that row stays lit with its submenu. Once the submenu is let go
+    /// (`follow`), the separator takes the highlight even if the pointer has stopped.
+    pub fn separator(&mut self, level: usize, r: &egui::Response) {
+        let held = self.aims.get(level).and_then(Option::as_ref).is_some_and(|a| a.held);
+        if held || !r.contains_pointer() {
+            return;
+        }
+        let moved = r.ctx.input(|inp| inp.pointer.delta() != egui::Vec2::ZERO);
+        let follow = self.follow == Some(level);
+        if !(moved || follow) {
+            return;
+        }
+        if follow {
+            self.follow = None;
+        }
+        if self.highlighted(level).is_some() {
+            self.set_hi(level, None);
+            r.ctx.request_repaint();
+        }
+    }
+
     fn enabled(&self, level: usize) -> Vec<usize> {
         self.rows.get(level).map(|rows| rows.iter().enumerate().filter(|(_, r)| r.enabled).map(|(i, _)| i).collect()).unwrap_or_default()
     }
