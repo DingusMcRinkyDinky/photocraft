@@ -83,10 +83,12 @@ pub struct Nav {
     pub bar_bottom: Option<f32>,
     /// The visible (scrolled) part of each level.
     pub(crate) views: Vec<Rect>,
-    /// [`Self::views`] as the frame before left them: a level's own view is only known once its
-    /// rows are drawn (and its submenu's once that is), so the tests made while drawing them use
-    /// these.
+    /// [`Self::views`] and each level's row rects as the frame before left them: a level's own
+    /// view is only known once its rows are drawn (and its submenu's once that is), and a
+    /// submenu's rows are dropped when its parent starts drawing, so the tests made while drawing
+    /// them use these.
     last_views: Vec<Rect>,
+    last_rows: Vec<Vec<Rect>>,
     /// The full height of each level's rows (taller than its view when it scrolls).
     pub(crate) contents: Vec<f32>,
     /// Per level: the row its open submenu hangs from (level 0 has none). From the frame
@@ -151,6 +153,7 @@ impl Nav {
     fn begin_level(&mut self, ui: &Ui, level: usize, root: Id) {
         if level == 0 {
             self.last_views = self.views.clone();
+            self.last_rows = self.rows.iter().map(|rows| rows.iter().map(|r| r.rect).collect()).collect();
         }
         self.follow_pointer(ui, level);
         self.rows.truncate(level);
@@ -173,10 +176,10 @@ impl Nav {
     fn follow_pointer(&mut self, ui: &Ui, level: usize) {
         let held = self.held_open(ui, level);
         let moved = ui.ctx().input(|i| i.pointer.delta() != egui::Vec2::ZERO);
-        if held == Some(true) || !(moved || held == Some(false)) || !self.views.get(level).is_some_and(|v| pointer_on(ui, *v)) {
+        if held == Some(true) || !(moved || held == Some(false)) || !self.last_views.get(level).is_some_and(|v| pointer_on(ui, *v)) {
             return;
         }
-        let under = self.rows.get(level).and_then(|rows| rows.iter().rposition(|r| pointer_on(ui, r.rect)));
+        let under = self.last_rows.get(level).and_then(|rects| rects.iter().rposition(|r| pointer_on(ui, *r)));
         if let Some(i) = under.filter(|&i| self.highlighted(level) != Some(i)) {
             self.set_hi(level, Some(i));
             self.level = level;

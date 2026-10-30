@@ -1313,3 +1313,127 @@ fn a_separator_takes_the_highlight_off_whichever_row_was_lit() {
     }
     assert!(checked > 0, "some menu has a separator between two visible rows");
 }
+
+/// Inside a submenu (Filter › Blur), inching from one item to the next hands the highlight over
+/// in one frame, as in the top-level menus: the item left isn't lit beside the next one. The
+/// highlight followed the pointer before the rows were drawn only in top-level menus; a submenu's
+/// rows from the frame before were dropped before it was drawn.
+#[test]
+fn inside_a_submenu_the_highlight_hands_over_in_one_frame() {
+    let mut wrong = Vec::new();
+    for (from, to) in [(1, 2), (2, 1), (3, 4)] {
+        let mut h = harness_dt(1.0 / 120.0);
+        open(&mut h, "Filter");
+        let blur = h.get_by_label("Blur").rect();
+        let rest = egui::pos2(blur.right() - 40.0, blur.center().y);
+        glide(&mut h, 12, None, |t| rest - egui::vec2(30.0 * (1.0 - t), 0.0));
+        h.run_steps(60);
+        let items = rows(&h, 1);
+        let (a, b) = (items[from].rect, items[to].rect);
+        assert!(items[from].enabled && items[to].enabled && (a.bottom() == b.top() || b.bottom() == a.top()), "Blur's items {from} and {to} touch");
+        let start = egui::pos2(a.left() + 40.0, a.center().y);
+        glide(&mut h, 10, None, |t| rest + (start - rest) * t);
+        h.run_steps(30);
+        let accent = crate::theme::Tokens::get(&h.ctx).accent;
+        let mut seen = String::new();
+        let steps = (b.center().y - a.center().y).abs() as usize;
+        for s in 1..=steps + 4 {
+            let y = a.center().y + (b.center().y - a.center().y).signum() * s.min(steps) as f32;
+            h.event(egui::Event::PointerMoved(egui::pos2(start.x, y)));
+            h.run_steps(1);
+            seen.push(match (row_fill(&h, a) == Some(accent), row_fill(&h, b) == Some(accent)) {
+                (true, false) => 'A',
+                (false, true) => 'B',
+                (true, true) => '2',
+                (false, false) => '.',
+            });
+        }
+        let handovers = seen.as_bytes().windows(2).filter(|w| w[0] != w[1]).count();
+        if !seen.starts_with('A') || !seen.ends_with('B') || handovers != 1 {
+            wrong.push(format!("Blur items {from} → {to}: {seen}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// A window tall enough for the whole Window menu, down to Theme (the 1280 × 720 one scrolls it).
+fn tall_harness() -> Harness<'static, PhotocraftApp> {
+    let mut h = Harness::builder().with_size(egui::vec2(1600.0, 1400.0)).with_step_dt(1.0 / 120.0).build_ui_state(
+        |ui, app| {
+            crate::menus::menu_bar(app, ui);
+        },
+        app(),
+    );
+    PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+    h.ctx.all_styles_mut(|s| s.scroll_animation = egui::style::ScrollAnimation::none());
+    h.run_steps(3);
+    h
+}
+
+/// The row of `level` whose submenu is open.
+fn open_submenu_row_at(h: &Harness<'static, PhotocraftApp>, level: usize) -> Option<usize> {
+    let nav = Nav::current(&h.ctx);
+    let open = MenuState::from_id(&h.ctx, *nav.roots.get(level)?, |s| s.open_item)?;
+    nav.rows.get(level)?.iter().position(|r| SubMenu::id_from_widget_id(r.widget) == open)
+}
+
+/// Window › Theme open with the pointer resting on its Dark Theme row, so Dark Theme's submenu is
+/// open; returns the Dark Theme and Light Theme rows (touching submenu rows, one level down) and
+/// where the pointer rests.
+fn rest_on_dark_theme(h: &mut Harness<'static, PhotocraftApp>) -> (egui::Rect, egui::Rect, egui::Pos2) {
+    open(h, "Window");
+    let theme = h.query_all_by_label("Theme").next().expect("Window › Theme").rect();
+    let p = egui::pos2(theme.right() - 30.0, theme.center().y);
+    glide(h, 12, None, |t| p - egui::vec2(30.0 * (1.0 - t), 0.0));
+    h.run_steps(60);
+    let themes = rows(h, 1);
+    let (dark, light) = (themes[0].rect, themes[1].rect);
+    assert!(themes[0].command.is_none() && themes[1].command.is_none() && dark.bottom() == light.top(), "Dark Theme and Light Theme are touching submenu rows");
+    let on_dark = egui::pos2(dark.left() + 60.0, dark.center().y);
+    glide(h, 10, None, |t| p + (on_dark - p) * t);
+    h.run_steps(60);
+    assert_eq!(open_submenu_row_at(h, 1), Some(0), "resting on Dark Theme opens its submenu");
+    (dark, light, on_dark)
+}
+
+/// One level down (Window › Theme › Dark Theme and Light Theme), inching between two touching
+/// submenu rows switches submenus as the pointer reaches the other row and hands the highlight
+/// over in one frame, as in the top-level menus; both rows were lit for a frame.
+#[test]
+fn in_a_submenu_touching_submenu_rows_switch_at_once() {
+    let mut wrong = Vec::new();
+    for down in [true, false] {
+        let mut h = tall_harness();
+        let (dark, light, on_dark) = rest_on_dark_theme(&mut h);
+        let (from, to, x, want) = if down {
+            (dark, light, on_dark.x, 1)
+        } else {
+            let on_light = egui::pos2(on_dark.x, light.center().y);
+            glide(&mut h, 4, None, |t| on_dark + (on_light - on_dark) * t);
+            h.run_steps(60);
+            (light, dark, on_dark.x, 0)
+        };
+        let accent = crate::theme::Tokens::get(&h.ctx).accent;
+        let mut seen = String::new();
+        let steps = (to.center().y - from.center().y).abs() as usize;
+        for s in 1..=steps + 6 {
+            let y = from.center().y + (to.center().y - from.center().y).signum() * s.min(steps) as f32;
+            h.event(egui::Event::PointerMoved(egui::pos2(x, y)));
+            h.run_steps(1);
+            seen.push(match (row_fill(&h, from) == Some(accent), row_fill(&h, to) == Some(accent)) {
+                (true, false) => 'A',
+                (false, true) => 'B',
+                (true, true) => '2',
+                (false, false) => '.',
+            });
+            if to.contains(egui::pos2(x, y - (to.center().y - from.center().y).signum() * 2.0)) && open_submenu_row_at(&h, 1) != Some(want) {
+                wrong.push(format!("{}: step {s}, the pointer is on row {want} but row {:?}'s submenu is open", if down { "down" } else { "up" }, open_submenu_row_at(&h, 1)));
+            }
+        }
+        let handovers = seen.as_bytes().windows(2).filter(|w| w[0] != w[1]).count();
+        if !seen.starts_with('A') || !seen.ends_with('B') || handovers != 1 {
+            wrong.push(format!("{}: {seen}", if down { "Dark → Light" } else { "Light → Dark" }));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
