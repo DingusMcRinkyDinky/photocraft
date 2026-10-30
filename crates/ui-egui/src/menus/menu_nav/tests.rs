@@ -1437,3 +1437,78 @@ fn in_a_submenu_touching_submenu_rows_switch_at_once() {
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+/// Into a submenu, onto one of its rows, then straight back onto the row it hangs from: the
+/// submenu stays open with nothing in it highlighted, and only the row it hangs from is lit, as in
+/// native menus. The submenu's row stayed highlighted too.
+#[test]
+fn back_on_its_row_a_submenu_has_nothing_highlighted() {
+    let mut wrong = Vec::new();
+    for (menu, sub_row) in [("Window", 0usize), ("Window", 2), ("Image", 1)] {
+        let mut h = harness_dt(1.0 / 120.0);
+        open(&mut h, menu);
+        let all = rows(&h, 0);
+        let src = all.iter().position(|r| r.command.is_none() && r.enabled).expect("a submenu row");
+        let row = all[src].rect;
+        let rest = egui::pos2(row.right() - 40.0, row.center().y);
+        glide(&mut h, 12, None, |t| rest - egui::vec2(30.0 * (1.0 - t), 0.0));
+        h.run_steps(60);
+        // Across into the submenu, onto its row `sub_row`.
+        let target = rows(&h, 1).get(sub_row).expect("a row in the submenu").rect;
+        let inside = egui::pos2(target.left() + 40.0, target.center().y);
+        glide(&mut h, 10, None, |t| rest + (inside - rest) * t);
+        h.run_steps(20);
+        if Nav::current(&h.ctx).highlighted(1) != Some(sub_row) {
+            wrong.push(format!("{menu}: the pointer on submenu row {sub_row} didn't highlight it"));
+            continue;
+        }
+        // Straight back onto the row it hangs from.
+        let back = egui::pos2(row.right() - 20.0, row.center().y);
+        glide(&mut h, 8, None, |t| inside + (back - inside) * t);
+        h.run_steps(20);
+        let nav = Nav::current(&h.ctx);
+        let accent = crate::theme::Tokens::get(&h.ctx).accent;
+        let lit_in_sub: Vec<usize> = rows(&h, 1).iter().enumerate().filter(|(_, r)| row_fill(&h, r.rect) == Some(accent)).map(|(i, _)| i).collect();
+        if open_submenu_row(&h) != Some(src) {
+            wrong.push(format!("{menu}: back on row {src}, its submenu closed"));
+        }
+        if nav.highlighted(0) != Some(src) {
+            wrong.push(format!("{menu}: back on row {src}, row {:?} is highlighted", nav.highlighted(0)));
+        }
+        if nav.highlighted(1).is_some() || !lit_in_sub.is_empty() {
+            wrong.push(format!("{menu}: back on row {src}, submenu row {:?} still highlighted (painted lit: {lit_in_sub:?})", nav.highlighted(1)));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// One level down too (Window › Theme › Dark Theme): into Dark Theme's submenu, onto one of its
+/// rows, then back onto Dark Theme: only Dark Theme is lit and its submenu has nothing highlighted.
+/// And out onto Light Theme instead, Light Theme's submenu doesn't open with that row lit.
+#[test]
+fn back_on_its_row_a_nested_submenu_has_nothing_highlighted() {
+    let mut wrong = Vec::new();
+    for back_on_dark in [true, false] {
+        let mut h = tall_harness();
+        let (dark, light, on_dark) = rest_on_dark_theme(&mut h);
+        let item = rows(&h, 2).get(1).expect("a row in Dark Theme's submenu").rect;
+        let inside = egui::pos2(item.left() + 40.0, item.center().y);
+        glide(&mut h, 10, None, |t| on_dark + (inside - on_dark) * t);
+        h.run_steps(30);
+        assert_eq!(Nav::current(&h.ctx).highlighted(2), Some(1), "the pointer on Dark Theme's row 1 highlights it");
+        let dest = if back_on_dark { egui::pos2(dark.right() - 20.0, dark.center().y) } else { egui::pos2(light.right() - 20.0, light.center().y) };
+        glide(&mut h, 6, None, |t| inside + (dest - inside) * t);
+        h.run_steps(30);
+        let accent = crate::theme::Tokens::get(&h.ctx).accent;
+        let lit: Vec<usize> = rows(&h, 2).iter().enumerate().filter(|(_, r)| row_fill(&h, r.rect) == Some(accent)).map(|(i, _)| i).collect();
+        let (on, want) = if back_on_dark { ("Dark Theme", 0) } else { ("Light Theme", 1) };
+        let nav = Nav::current(&h.ctx);
+        if open_submenu_row_at(&h, 1) != Some(want) || nav.highlighted(1) != Some(want) {
+            wrong.push(format!("on {on}: row {:?} highlighted, row {:?}'s submenu open", nav.highlighted(1), open_submenu_row_at(&h, 1)));
+        }
+        if nav.highlighted(2).is_some() || !lit.is_empty() {
+            wrong.push(format!("on {on}: its submenu has row {:?} highlighted (painted lit: {lit:?})", nav.highlighted(2)));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}

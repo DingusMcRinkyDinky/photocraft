@@ -179,11 +179,17 @@ impl Nav {
         if held == Some(true) || !(moved || held == Some(false)) || !self.last_views.get(level).is_some_and(|v| pointer_on(ui, *v)) {
             return;
         }
-        let under = self.last_rows.get(level).and_then(|rects| rects.iter().rposition(|r| pointer_on(ui, *r)));
-        if let Some(i) = under.filter(|&i| self.highlighted(level) != Some(i)) {
-            self.set_hi(level, Some(i));
-            self.level = level;
+        let Some(i) = self.last_rows.get(level).and_then(|rects| rects.iter().rposition(|r| pointer_on(ui, *r))) else { return };
+        // On a row of this level, nothing in a deeper one is highlighted: back on the row a
+        // submenu hangs from, the submenu stays open with nothing in it lit, as in native menus
+        // (its last row stayed lit beside this one).
+        for deeper in self.hi.iter_mut().skip(level + 1) {
+            *deeper = None;
         }
+        if self.highlighted(level) != Some(i) {
+            self.set_hi(level, Some(i));
+        }
+        self.level = level;
     }
 
     /// Draw a row of `level` with `add`, highlighted like a hovered row when the keyboard (or the
