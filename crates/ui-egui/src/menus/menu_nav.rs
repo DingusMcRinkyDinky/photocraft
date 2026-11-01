@@ -493,9 +493,14 @@ impl Nav {
         let level = self.level.min(self.rows.len().saturating_sub(1));
         self.level = level;
         // A text field in the menu (Help › Search) keeps the keys that edit it: Space types a
-        // space, and ← / → move its cursor while it has text and no row is highlighted.
-        let typing = ctx.text_edit_focused();
-        let cursor = typing && self.search_text && self.hi.iter().all(Option::is_none);
+        // space, and ← / → move its cursor while it has text and no row is highlighted. Any other
+        // text field keeps them all (F10 or Alt leaves it the focus). A zoom field keeps the
+        // keyboard while a menu title is clicked (zoom_field.rs), but is not in the menu: the menu
+        // takes the keys, unless it has a text field of its own (Help › Search, which the zoom
+        // field keeps out).
+        let search = super::search::shown(ctx);
+        let typing = ctx.text_edit_focused() && !(crate::zoom_field::is_focused(ctx) && !search);
+        let cursor = typing && (!search || self.search_text && self.hi.iter().all(Option::is_none));
         let held = |k: Key| match k {
             Key::ArrowLeft | Key::ArrowRight => cursor,
             Key::Space => typing,
@@ -531,6 +536,7 @@ impl Nav {
                 switch(tops.len() - 1);
             }
         } else if press(Key::Enter) || press(Key::Space) {
+            crate::zoom_field::drop_text(ctx, ' ');
             match current {
                 Some(Row { enabled: true, command: Some(c), .. }) => {
                     *clicked = Some(c);
