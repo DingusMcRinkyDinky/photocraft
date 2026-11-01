@@ -10,8 +10,8 @@
 //!
 //! An open submenu stays open while the pointer heads for it (#1218), as in macOS and Photoshop
 //! menus: crossing the rows between its row and the submenu, on a diagonal, a curved path or with
-//! a pause on the way, neither closes it nor opens the submenu of a row crossed. The pointer
-//! resting on another row, or moving away from the submenu, switches as before.
+//! a pause on the way, the highlight follows the pointer, but no row crossed opens its submenu.
+//! The pointer resting on another row, or moving away from the submenu, switches as before.
 
 use egui::containers::menu::{MenuState, SubMenu, find_menu_root};
 use egui::{Id, Key, Modifiers, Pos2, Rect, Sense, Ui, pos2, vec2};
@@ -169,14 +169,21 @@ impl Nav {
     /// Before `level`'s rows are drawn: the pointer having moved onto one of them (where they were
     /// last frame) highlights it now, not once that row is drawn, so a row drawn before it (the
     /// one above, stepping down) isn't drawn highlighted a frame longer. Where rows touch, the
-    /// lower one wins, as in egui's hit test. Not while the pointer heads for the open submenu of
-    /// the highlighted row: [`Self::hold`] keeps that row highlighted, and it went dark for a
-    /// frame in between. When that submenu is let go (the pointer rested), the row under the
-    /// pointer takes the highlight now too, moving or not: both rows were lit for a frame.
+    /// lower one wins, as in egui's hit test. Also while the pointer heads for an open submenu:
+    /// only the submenu stays. When that submenu is let go (the pointer rested), the row under the
+    /// pointer takes the highlight now too, moving or not: both rows were lit for a frame. In the
+    /// submenu, the highlight goes back to the row it hangs from.
     fn follow_pointer(&mut self, ui: &Ui, level: usize) {
         let held = self.held_open(ui, level);
         let moved = ui.ctx().input(|i| i.pointer.delta() != egui::Vec2::ZERO);
-        if held == Some(true) || !(moved || held == Some(false)) || !self.last_views.get(level).is_some_and(|v| pointer_on(ui, *v)) {
+        let index = self.aims.get(level).and_then(Option::as_ref).map(|a| a.index);
+        let sub = self.last_views.get(level + 1).copied();
+        let in_sub = ui.ctx().pointer_hover_pos().is_some_and(|p| sub.is_some_and(|v| v.contains(p)));
+        if let Some(index) = index.filter(|_| in_sub) {
+            self.set_hi(level, Some(index));
+            return;
+        }
+        if !(moved || held == Some(false)) || !self.last_views.get(level).is_some_and(|v| pointer_on(ui, *v)) {
             return;
         }
         let Some(i) = self.last_rows.get(level).and_then(|rects| rects.iter().rposition(|r| pointer_on(ui, *r))) else { return };
@@ -205,30 +212,23 @@ impl Nav {
         add: impl FnOnce(&mut Ui, &mut Nav) -> (egui::Response, R),
     ) -> R {
         let i = self.rows.get(level).map_or(usize::MAX, Vec::len);
-        // While a submenu is kept open for the pointer heading to it, its row stays lit and the
-        // rows crossed on the way don't light up; not in the frame it's let go.
-        let held = self.aims.get(level).and_then(Option::as_ref).filter(|a| a.held).map(|a| a.index).filter(|_| self.held_open(ui, level) != Some(false));
-        let lit = enabled && (held == Some(i) || held.is_none() && self.highlighted(level) == Some(i));
-        let saved = (ui.visuals().widgets.inactive, ui.visuals().widgets.hovered);
+        let lit = enabled && self.highlighted(level) == Some(i);
+        let saved = (ui.visuals().widgets.inactive, ui.visuals().widgets.active);
         if lit {
-            ui.visuals_mut().widgets.inactive = ui.visuals().widgets.hovered;
-        } else if held.is_some() {
-            ui.visuals_mut().widgets.hovered = ui.visuals().widgets.inactive;
+            // Active too: egui draws a focused widget so, and the arrow keys move the focus.
+            let hovered = ui.visuals().widgets.hovered;
+            (ui.visuals_mut().widgets.inactive, ui.visuals_mut().widgets.active) = (hovered, hovered);
         }
         let root = self.roots.get(level).copied().filter(|_| command.is_none());
         let open = root.and_then(|root| MenuState::from_id(ui.ctx(), root, |s| s.open_item));
         let (r, out) = add(ui, self);
-        (ui.visuals_mut().widgets.inactive, ui.visuals_mut().widgets.hovered) = saved;
+        (ui.visuals_mut().widgets.inactive, ui.visuals_mut().widgets.active) = saved;
         if let Some(root) = root {
             self.aim(level, i, root, open, &r);
         }
         if let Some(rows) = self.rows.get_mut(level) {
             rows.push(Row { widget: r.id, enabled, command: command.map(str::to_string), rect: r.rect, mnemonic });
-            if let Some(index) = held {
-                self.set_hi(level, Some(index));
-            } else {
-                self.after_row(level, i, lit, &r);
-            }
+            self.after_row(level, i, lit, &r);
         }
         out
     }
@@ -308,10 +308,16 @@ impl Nav {
         true
     }
 
+    /// Is the row drawn next in `level` the highlighted one? Then it's lit also with its submenu
+    /// open, which shows where the submenu hangs from.
+    pub(crate) fn next_row_lit(&self, level: usize) -> bool {
+        self.highlighted(level).is_some_and(|i| self.rows.get(level).is_some_and(|rows| rows.len() == i))
+    }
+
     /// Is the pointer off the row `ui` draws next in `level`, whose submenu is open, on another
-    /// row or a separator of this menu? The row is then drawn highlighted while the pointer heads
-    /// for the submenu and plain once it closes, not in the open-submenu style, which is for the
-    /// pointer (or the keyboard) in the submenu: the row flashed gray for a frame when the pointer
+    /// row or a separator of this menu? The row is then drawn plain, not in the open-submenu
+    /// style, which is for the pointer (or the keyboard) in the submenu: the row flashed gray for a
+    /// frame when the pointer
     /// stepped onto a separator or the next row, or came back out of the submenu onto another row.
     pub(crate) fn elsewhere_in_menu(&self, ui: &Ui, level: usize) -> bool {
         self.aims.get(level).and_then(Option::as_ref).is_some_and(|a| a.row == ui.next_auto_id()) && self.held_open(ui, level).is_some()
@@ -360,12 +366,10 @@ impl Nav {
 
     /// Call with the response of a separator drawn in `level`. A separator is not a row, so nothing
     /// else takes the highlight when the pointer moves onto it, and the last row would stay lit (a
-    /// native menu clears it). Leaves the highlight alone while a submenu is held open for the
-    /// pointer heading to it, since that row stays lit with its submenu. Once the submenu is let go
-    /// (`follow`), the separator takes the highlight even if the pointer has stopped.
+    /// native menu clears it). Once a held submenu is let go (`follow`), the separator takes the
+    /// highlight even if the pointer has stopped.
     pub fn separator(&mut self, level: usize, r: &egui::Response) {
-        let held = self.aims.get(level).and_then(Option::as_ref).is_some_and(|a| a.held);
-        if held || !r.contains_pointer() {
+        if !r.contains_pointer() {
             return;
         }
         let moved = r.ctx.input(|inp| inp.pointer.delta() != egui::Vec2::ZERO);

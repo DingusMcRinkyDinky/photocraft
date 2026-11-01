@@ -827,7 +827,7 @@ fn bowed(a: egui::Pos2, b: egui::Pos2, bow: f32) -> impl Fn(f32) -> egui::Pos2 {
 
 /// #1218: heading from Image › Mode for a row low in its submenu, the pointer crosses the
 /// Adjustments row. On a diagonal, a bowed path or with a short pause on the way, Mode's submenu
-/// stays open and Adjustments' doesn't open; the crossed row isn't highlighted.
+/// stays open and Adjustments' doesn't open; arriving, Mode is the highlighted row.
 #[test]
 fn a_submenu_stays_open_while_the_pointer_heads_for_it() {
     struct Path {
@@ -1031,6 +1031,23 @@ fn resting_while_heading_for_a_submenu_switches_after_aim_rest() {
     assert!(waited.is_some_and(|k| k + 2 >= rest && k <= rest + 2), "switched {waited:?} frames after the pointer stopped, AIM_REST is {rest}");
 }
 
+/// While a submenu is held, the highlight is on the row under the pointer, the submenu stays open
+/// beside it, and the submenu's own highlight is gone.
+#[test]
+fn the_highlight_follows_the_pointer_while_a_submenu_is_held() {
+    let mut h = harness_dt(1.0 / 120.0);
+    let (from, adjustments, target) = rest_on_mode(&mut h);
+    let to = egui::pos2(target.left() + 40.0, target.center().y);
+    let row = rows(&h, 0).iter().position(|r| r.rect.contains(adjustments.center()));
+    let mut seen = false;
+    for k in 0..=36 {
+        let p = from + (to - from) * (k as f32 / 36.0);
+        move_pointer(&mut h, p);
+        seen |= adjustments.contains(p) && Nav::current(&h.ctx).highlighted(0) == row && image_submenu(&h) == "Mode";
+    }
+    assert!(seen, "Adjustments was lit with Mode's submenu still open");
+}
+
 /// The row of the top-level menu whose submenu is open.
 fn open_submenu_row(h: &Harness<'static, PhotocraftApp>) -> Option<usize> {
     let nav = Nav::current(&h.ctx);
@@ -1142,13 +1159,12 @@ fn leaving_a_submenu_row_never_flashes_the_open_submenu_style() {
 }
 
 /// A quick move down and toward the open submenu, onto the next submenu row (Window › Arrange to
-/// Workspace): the submenu stays open while the pointer heads for it, and its row stays
-/// highlighted throughout, then hands the highlight over once. The highlight moved to the row
-/// under the pointer before the rows were drawn, so the held row went dark for a frame first.
+/// Workspace): the submenu stays open while the pointer heads for it, and the highlight moves to
+/// the row under the pointer once, without a frame of neither or both rows lit.
 #[test]
-fn heading_for_a_submenu_keeps_its_row_highlighted_without_a_blink() {
+fn heading_for_a_submenu_hands_the_highlight_over_once() {
     let mut wrong = Vec::new();
-    for (frames, dx) in [(2, 8.0), (3, 20.0), (4, 12.0), (6, 30.0)] {
+    for (frames, dx) in [(2, 26.0), (3, 30.0), (4, 28.0), (6, 34.0)] {
         let mut h = harness_dt(1.0 / 120.0);
         open(&mut h, "Window");
         let all = rows(&h, 0);
@@ -1159,11 +1175,13 @@ fn heading_for_a_submenu_keeps_its_row_highlighted_without_a_blink() {
         let accent = crate::theme::Tokens::get(&h.ctx).accent;
         let end = egui::pos2(rest.x + dx, to.center().y);
         let mut lit = String::new();
+        let mut kept = 0;
         for k in 1..=frames + 60 {
             if k <= frames {
                 h.event(egui::Event::PointerMoved(rest + (end - rest) * (k as f32 / frames as f32)));
             }
             h.run_steps(1);
+            kept += usize::from(k >= frames && open_submenu_row(&h) == Some(0));
             lit.push(match (row_fill(&h, from) == Some(accent), row_fill(&h, to) == Some(accent)) {
                 (true, false) => 'A',
                 (false, true) => 'W',
@@ -1171,13 +1189,13 @@ fn heading_for_a_submenu_keeps_its_row_highlighted_without_a_blink() {
                 (false, false) => '.',
             });
         }
-        // Arrange lit, then Workspace lit: one handover, nothing else.
+        // Arrange lit, then Workspace lit: at most one handover, nothing else.
         let handovers = lit.as_bytes().windows(2).filter(|w| w[0] != w[1]).count();
-        if !lit.starts_with('A') || !lit.ends_with('W') || handovers != 1 {
+        if lit.contains(['2', '.']) || !lit.ends_with('W') || handovers > 1 {
             wrong.push(format!("{frames} frames, {dx:+} px: {lit}"));
         }
-        if !lit.contains(&"A".repeat(30)) {
-            wrong.push(format!("{frames} frames, {dx:+} px: Arrange's submenu wasn't kept while heading for it: {lit}"));
+        if kept + 2 < (super::AIM_REST * 120.0) as usize {
+            wrong.push(format!("{frames} frames, {dx:+} px: Arrange's submenu was kept {kept} frames while heading for it"));
         }
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
@@ -1226,13 +1244,12 @@ fn a_submenu_let_go_while_the_pointer_rests_disappears() {
 }
 
 /// Into a submenu, then out of it straight onto another row of the menu, not over the row it hangs
-/// from: that row goes from the open-submenu style to plain as the other row lights up, without
-/// lighting up itself on the way. The pointer heading for the submenu was judged from where it
-/// had left the row on the way in, so landing below and to the right of that held the submenu a
-/// frame or two with its row lit; and the pointer on the menu's border closed it with no row there
-/// to take the highlight.
+/// from: the highlight goes from that row to the other in one frame, without either being gray or
+/// both lit. The pointer heading for the submenu was judged from where it had left the row on the
+/// way in, so landing below and to the right of that held the submenu a frame or two; and the
+/// pointer on the menu's border closed it with no row there to take the highlight.
 #[test]
-fn leaving_a_submenu_for_another_row_doesnt_light_its_row() {
+fn leaving_a_submenu_for_another_row_hands_the_highlight_over() {
     // (menu, row landed on, submenu row the pointer leaves from, frames to get there)
     let cases = [("Window", 1, 0.5, 4), ("Window", 3, 2.5, 4), ("Window", 1, 2.5, 8), ("Image", 2, 4.5, 6)];
     let mut wrong = Vec::new();
@@ -1266,11 +1283,48 @@ fn leaving_a_submenu_for_another_row_doesnt_light_its_row() {
                 (None, false) => '.',
             });
         }
-        if seen.contains(['L', '2']) || !seen.ends_with('D') {
-            wrong.push(format!("{menu} row {src} → {land_on}: {seen} (L: row {src} lit, 2: it and row {land_on} at once)"));
+        if seen.contains(['2', 'g', '.']) || !seen.starts_with('L') || !seen.ends_with('D') {
+            wrong.push(format!("{menu} row {src} → {land_on}: {seen} (L: row {src} lit, D: row {land_on} lit, 2: both, g: gray)"));
         }
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// With the pointer in a submenu, the row it hangs from is drawn highlighted, not in egui's gray
+/// open-submenu style, so it's easy to see where the submenu came from. Back on that row it stays
+/// lit and nothing in the submenu is.
+#[test]
+fn inside_a_submenu_its_row_stays_highlighted() {
+    let mut h = harness_dt(1.0 / 120.0);
+    let (from, _, target) = rest_on_mode(&mut h);
+    let mode = rows(&h, 0).iter().find(|r| r.rect.contains(from)).expect("the Mode row").rect;
+    let accent = crate::theme::Tokens::get(&h.ctx).accent;
+    let inside = egui::pos2(target.left() + 40.0, target.center().y);
+    glide(&mut h, 20, None, |t| from + (inside - from) * t);
+    h.run_steps(4);
+    assert_eq!(image_submenu(&h), "Mode");
+    assert_eq!(row_fill(&h, mode), Some(accent), "in the submenu");
+    assert!(Nav::current(&h.ctx).highlighted(1).is_some(), "the submenu's own row is lit too");
+    glide(&mut h, 20, None, |t| inside + (from - inside) * t);
+    h.run_steps(4);
+    assert_eq!(row_fill(&h, mode), Some(accent), "back on the row");
+    assert_eq!(Nav::current(&h.ctx).highlighted(1), None, "nothing in the submenu is lit");
+}
+
+/// The keys light a row exactly as the pointer does. egui draws a focused widget in its active
+/// style, and the arrow keys move the focus along, so a row reached from the keyboard was gray.
+#[test]
+fn the_keyboard_highlights_rows_as_the_pointer_does() {
+    let mut h = harness_dt(1.0 / 120.0);
+    open(&mut h, "Image");
+    let all = rows(&h, 0);
+    let accent = crate::theme::Tokens::get(&h.ctx).accent;
+    for _ in 0..4 {
+        key(&mut h, egui::Key::ArrowDown);
+        h.run_steps(5);
+        let i = Nav::current(&h.ctx).highlighted(0).expect("a highlighted row");
+        assert_eq!(row_fill(&h, all[i].rect), Some(accent), "row {i}");
+    }
 }
 
 /// Moves the pointer to `p` and runs a frame, as the other pointer tests do.
