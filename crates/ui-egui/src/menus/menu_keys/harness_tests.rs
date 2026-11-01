@@ -650,3 +650,38 @@ fn a_text_field_outside_the_menu_keeps_its_arrows() {
         assert_eq!(Nav::current(&h.ctx).top, top, "{k:?} stays with the field");
     }
 }
+
+/// Esc closing a menu leaves a text field outside it as it was. egui drops the focus on any Esc,
+/// before the menu sees the key, so typing stopped, and a layer rename, which commits when its
+/// field loses the focus, took the name that Esc would otherwise have cancelled.
+#[test]
+fn esc_closing_a_menu_keeps_the_text_field_in_focus() {
+    let field = egui::Id::unique("a text field");
+    let mut h = Harness::builder().with_size(egui::vec2(1280.0, 720.0)).build_ui_state(
+        move |ui, (app, text, lost): &mut (PhotocraftApp, String, bool)| {
+            crate::menus::menu_bar(app, ui);
+            let label = ui.label("Name");
+            *lost |= ui.add(egui::TextEdit::singleline(text).id(field)).labelled_by(label.id).lost_focus();
+        },
+        (app(), "some text".to_string(), false),
+    );
+    PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+    h.run_steps(3);
+    h.ctx.memory_mut(|m| m.request_focus(field));
+    h.run_steps(3);
+    h.input_mut().events.extend([
+        egui::Event::ModifiersChanged(egui::Modifiers::ALT),
+        egui::Event::Key { key: egui::Key::F, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::ALT },
+        egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+    ]);
+    h.run_steps(3);
+    assert!(is_open(&h.ctx), "Alt+F opened File");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(5);
+    assert!(!is_open(&h.ctx), "Esc closed it");
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(field), "the field still has the keyboard");
+    assert!(!h.state().2, "and never lost it");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(5);
+    assert_eq!(h.ctx.memory(|m| m.focused()), None, "with no menu open, Esc leaves the field as usual");
+}

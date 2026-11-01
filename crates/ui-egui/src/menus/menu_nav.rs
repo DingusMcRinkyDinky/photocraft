@@ -108,6 +108,8 @@ pub struct Nav {
     keyboard: bool,
     /// Help's search field has text this frame.
     pub(crate) search_text: bool,
+    /// The text field with the keyboard while a menu is open, as of the last frame.
+    field: Option<Id>,
 }
 
 fn nav_id() -> Id {
@@ -513,6 +515,7 @@ impl Nav {
             _ => false,
         };
         let press = |k: Key| !held(k) && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, k));
+        let field = std::mem::replace(&mut self.field, ctx.memory(|m| m.focused()).filter(|_| ctx.text_edit_focused()));
         let current = self.highlighted(level).and_then(|i| self.rows.get(level)?.get(i)).cloned();
         let switch = |by: usize| {
             let n = tops.len();
@@ -522,6 +525,11 @@ impl Nav {
         };
         if press(Key::Escape) {
             egui::Popup::close_all(ctx);
+            // egui dropped the focus on this Esc, which was for the menu. Help's field goes with
+            // the menu.
+            if let Some(field) = field.filter(|_| !search) {
+                ctx.memory_mut(|m| m.request_focus(field));
+            }
         } else if press(Key::ArrowDown) {
             self.step_away(ctx, level, true);
         } else if press(Key::ArrowUp) {
