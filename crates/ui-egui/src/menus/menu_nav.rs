@@ -108,7 +108,7 @@ pub struct Nav {
     keyboard: bool,
     /// Help's search field has text this frame.
     pub(crate) search_text: bool,
-    /// The text field with the keyboard while a menu is open, as of the last frame.
+    /// The text field with the keyboard, as of the last frame.
     field: Option<Id>,
 }
 
@@ -133,7 +133,7 @@ impl Nav {
         let mut nav: Nav = ctx.data(|d| d.get_temp(nav_id())).unwrap_or_default();
         let top = nav.tops.iter().position(|id| egui::Popup::is_id_open(ctx, *id));
         if top != nav.top {
-            nav = Nav { top, tops: std::mem::take(&mut nav.tops), keyboard: nav.keyboard && top.is_some(), ..Default::default() };
+            nav = Nav { top, tops: std::mem::take(&mut nav.tops), keyboard: nav.keyboard && top.is_some(), field: nav.field, ..Default::default() };
         }
         // egui moves the focus with the arrow keys too, along the menu titles and into a submenu
         // beside the menu: gray rows, and a gray title one step behind the open menu.
@@ -497,6 +497,7 @@ impl Nav {
     /// bar's popup ids; an activated command lands in `clicked`.
     pub fn keys(&mut self, ctx: &egui::Context, tops: &[Id], clicked: &mut Option<String>) {
         self.tops = tops.to_vec();
+        let field = std::mem::replace(&mut self.field, ctx.memory(|m| m.focused()).filter(|_| ctx.text_edit_focused()));
         let Some(top) = self.top.filter(|_| !tops.is_empty()) else { return };
         let level = self.level.min(self.rows.len().saturating_sub(1));
         self.level = level;
@@ -515,7 +516,6 @@ impl Nav {
             _ => false,
         };
         let press = |k: Key| !held(k) && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, k));
-        let field = std::mem::replace(&mut self.field, ctx.memory(|m| m.focused()).filter(|_| ctx.text_edit_focused()));
         let current = self.highlighted(level).and_then(|i| self.rows.get(level)?.get(i)).cloned();
         let switch = |by: usize| {
             let n = tops.len();
