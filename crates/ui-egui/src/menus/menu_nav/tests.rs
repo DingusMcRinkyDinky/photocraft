@@ -1566,3 +1566,61 @@ fn back_on_its_row_a_nested_submenu_has_nothing_highlighted() {
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+/// The rows of the open levels drawn with any fill, as (level, row).
+fn filled_rows(h: &Harness<'static, PhotocraftApp>) -> Vec<(usize, usize)> {
+    let mut filled = Vec::new();
+    for level in 0..2 {
+        for (i, r) in rows(h, level).iter().enumerate() {
+            if row_fill(h, r.rect).is_some() {
+                filled.push((level, i));
+            }
+        }
+    }
+    filled
+}
+
+/// The pointer left on a submenu's row, the arrow keys take over: one row is lit, the submenu
+/// closes, and no other row opens under the pointer. egui's hover kept the pointer's row lit, and
+/// its focus walked a gray row through the submenu beside the menu.
+#[test]
+fn with_the_pointer_resting_the_arrow_keys_light_one_row() {
+    let mut h = harness_dt(1.0 / 120.0);
+    rest_on_mode(&mut h);
+    for k in [egui::Key::ArrowDown, egui::Key::ArrowDown, egui::Key::ArrowDown, egui::Key::ArrowUp, egui::Key::ArrowUp, egui::Key::ArrowUp] {
+        key(&mut h, k);
+        h.run_steps(5);
+        let hi = Nav::current(&h.ctx).highlighted(0).expect("a highlighted row");
+        assert_eq!(filled_rows(&h), vec![(0, hi)], "only the keys' row is lit");
+        assert_eq!(image_submenu(&h), "none", "nothing is open with the pointer resting");
+        assert_eq!(h.ctx.memory(|m| m.focused()), None, "egui's focus doesn't walk along");
+    }
+}
+
+/// Moving the pointer gives the menu back to it.
+#[test]
+fn moving_the_pointer_after_the_arrow_keys_takes_the_menu_back() {
+    let mut h = harness_dt(1.0 / 120.0);
+    let (from, ..) = rest_on_mode(&mut h);
+    key(&mut h, egui::Key::ArrowDown);
+    h.run_steps(5);
+    assert_eq!(image_submenu(&h), "none");
+    glide(&mut h, 6, None, |t| from + egui::vec2(6.0 * t, 0.0));
+    h.run_steps(30);
+    assert_eq!(image_submenu(&h), "Mode", "the pointer opens the row it is on again");
+    assert_eq!(filled_rows(&h), vec![(0, 0)], "and is the one row lit");
+}
+
+/// ← out of a submenu with the pointer resting on its row closes it: the row doesn't reopen it.
+#[test]
+fn left_out_of_a_submenu_stays_closed_with_the_pointer_on_its_row() {
+    let mut h = harness_dt(1.0 / 120.0);
+    rest_on_mode(&mut h);
+    key(&mut h, egui::Key::ArrowRight);
+    h.run_steps(5);
+    assert_eq!(image_submenu(&h), "Mode");
+    key(&mut h, egui::Key::ArrowLeft);
+    h.run_steps(30);
+    assert_eq!(image_submenu(&h), "none");
+    assert_eq!(filled_rows(&h), vec![(0, 0)]);
+}

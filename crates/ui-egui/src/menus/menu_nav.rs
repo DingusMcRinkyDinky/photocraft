@@ -104,6 +104,8 @@ pub struct Nav {
     /// A held submenu of this level let go: the row under the pointer takes the highlight even
     /// if the pointer rests.
     follow: Option<usize>,
+    /// The keys moved the highlight, and the pointer hasn't moved since.
+    keyboard: bool,
 }
 
 fn nav_id() -> Id {
@@ -154,6 +156,11 @@ impl Nav {
         if level == 0 {
             self.last_views = self.views.clone();
             self.last_rows = self.rows.iter().map(|rows| rows.iter().map(|r| r.rect).collect()).collect();
+            self.keyboard &= ui.ctx().input(|i| i.pointer.delta() == egui::Vec2::ZERO);
+            // egui moves the focus with the arrow keys too, into a submenu beside the menu: gray rows.
+            if let Some(focus) = ui.ctx().memory(|m| m.focused()).filter(|_| self.keyboard && !ui.ctx().text_edit_focused()) {
+                ui.ctx().memory_mut(|m| m.surrender_focus(focus));
+            }
         }
         self.follow_pointer(ui, level);
         self.rows.truncate(level);
@@ -179,7 +186,7 @@ impl Nav {
         let index = self.aims.get(level).and_then(Option::as_ref).map(|a| a.index);
         let sub = self.last_views.get(level + 1).copied();
         let in_sub = ui.ctx().pointer_hover_pos().is_some_and(|p| sub.is_some_and(|v| v.contains(p)));
-        if let Some(index) = index.filter(|_| in_sub) {
+        if let Some(index) = index.filter(|_| in_sub && !self.keyboard) {
             self.set_hi(level, Some(index));
             return;
         }
@@ -213,7 +220,11 @@ impl Nav {
     ) -> R {
         let i = self.rows.get(level).map_or(usize::MAX, Vec::len);
         let lit = enabled && self.highlighted(level) == Some(i);
-        let saved = (ui.visuals().widgets.inactive, ui.visuals().widgets.active);
+        let saved = (ui.visuals().widgets.inactive, ui.visuals().widgets.active, ui.visuals().widgets.hovered);
+        if self.keyboard && !lit {
+            // The keys have the highlight: a pointer left resting on this row doesn't light it too.
+            ui.visuals_mut().widgets.hovered = ui.visuals().widgets.inactive;
+        }
         if lit {
             // Active too: egui draws a focused widget so, and the arrow keys move the focus.
             let hovered = ui.visuals().widgets.hovered;
@@ -222,7 +233,7 @@ impl Nav {
         let root = self.roots.get(level).copied().filter(|_| command.is_none());
         let open = root.and_then(|root| MenuState::from_id(ui.ctx(), root, |s| s.open_item));
         let (r, out) = add(ui, self);
-        (ui.visuals_mut().widgets.inactive, ui.visuals_mut().widgets.active) = saved;
+        (ui.visuals_mut().widgets.inactive, ui.visuals_mut().widgets.active, ui.visuals_mut().widgets.hovered) = saved;
         if let Some(root) = root {
             self.aim(level, i, root, open, &r);
         }
@@ -306,6 +317,12 @@ impl Nav {
         aim.held = true;
         ctx.request_repaint_after_secs(AIM_REST - rest);
         true
+    }
+
+    /// Have the keys moved the highlight, with the pointer not moved since? A pointer left resting
+    /// on a row then neither lights it nor opens its submenu.
+    pub(crate) fn keyboard(&self) -> bool {
+        self.keyboard
     }
 
     /// Is the row drawn next in `level` the highlighted one? Then it's lit also with its submenu
@@ -476,9 +493,9 @@ impl Nav {
         if press(Key::Escape) {
             egui::Popup::close_all(ctx);
         } else if press(Key::ArrowDown) {
-            self.step(level, true);
+            self.step_away(ctx, level, true);
         } else if press(Key::ArrowUp) {
-            self.step(level, false);
+            self.step_away(ctx, level, false);
         } else if press(Key::ArrowRight) {
             match current {
                 Some(Row { widget, enabled: true, command: None, .. }) => self.open_sub(ctx, level, widget),
@@ -506,7 +523,17 @@ impl Nav {
         } else {
             return;
         }
+        self.keyboard = true;
         ctx.request_repaint();
+    }
+
+    /// ↑ / ↓ in `level`: leaving a row closes its open submenu, as in native menus.
+    fn step_away(&mut self, ctx: &egui::Context, level: usize, down: bool) {
+        let from = self.highlighted(level);
+        self.step(level, down);
+        if let Some(&root) = self.roots.get(level).filter(|_| self.highlighted(level) != from) {
+            MenuState::from_id(ctx, root, |s| s.open_item = None);
+        }
     }
 
     pub fn store(self, ctx: &egui::Context) {
