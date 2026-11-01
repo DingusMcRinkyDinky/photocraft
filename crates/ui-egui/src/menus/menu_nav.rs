@@ -446,6 +446,12 @@ impl Nav {
     }
 
     /// Open the highlighted submenu of `level` and move the keyboard into it.
+    /// No row is highlighted any more: the rows have changed, and a highlight is a position among
+    /// them.
+    pub(crate) fn clear_highlight(&mut self) {
+        self.hi.clear();
+    }
+
     /// Light the first enabled row of `level` once it has been drawn (a menu opened from the
     /// keyboard, as on Windows).
     pub(crate) fn highlight_first(&mut self, level: usize) {

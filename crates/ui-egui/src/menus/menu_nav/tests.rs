@@ -1782,3 +1782,22 @@ fn a_separator_clears_the_highlight_of_the_submenu_below() {
     assert_eq!(open_submenu_row(&h), Some(i), "the scroll brings the row back under the pointer");
     assert_eq!(filled_rows(&h).iter().filter(|(level, _)| *level == 1).count(), 0, "with nothing in it lit");
 }
+
+/// Changing the search text clears the highlight: the results shift the rows below them, so a
+/// highlight on a result landed on a Help row, and ↩ ran that.
+#[test]
+fn changing_the_search_text_clears_the_highlight() {
+    let mut h = harness_dt(1.0 / 120.0);
+    open(&mut h, "Help");
+    h.event(egui::Event::Text("lev".into()));
+    h.run_steps(3);
+    key(&mut h, egui::Key::ArrowDown);
+    h.run_steps(5);
+    assert!(Nav::current(&h.ctx).highlighted(0).is_some(), "a result is lit");
+    h.event(egui::Event::Text("zzz".into()));
+    h.run_steps(3);
+    assert_eq!(Nav::current(&h.ctx).highlighted(0), None, "no row is lit with nothing found");
+    key(&mut h, egui::Key::ArrowDown);
+    h.run_steps(5);
+    assert!(Nav::current(&h.ctx).highlighted(0).is_some(), "↓ still lights a row");
+}
