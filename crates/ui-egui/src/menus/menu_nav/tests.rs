@@ -863,8 +863,9 @@ fn a_submenu_stays_open_while_the_pointer_heads_for_it() {
         if open != "Mode" {
             wrong.push(format!("{name}: arrived with {open} open, not Mode"));
         }
-        if let Some(row) = Nav::current(&h.ctx).highlighted(0).filter(|&row| row != mode_row) {
-            wrong.push(format!("{name}: row {row} is highlighted, not Mode"));
+        let row = Nav::current(&h.ctx).highlighted(0);
+        if row != Some(mode_row) {
+            wrong.push(format!("{name}: row {row:?} is highlighted, not Mode"));
         }
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
@@ -1800,4 +1801,18 @@ fn changing_the_search_text_clears_the_highlight() {
     key(&mut h, egui::Key::ArrowDown);
     h.run_steps(5);
     assert!(Nav::current(&h.ctx).highlighted(0).is_some(), "↓ still lights a row");
+}
+
+/// An accessibility click opens a closed submenu row while the keys have the highlight: only the
+/// pointer resting on a row is ignored then, and the row returned before egui saw the click.
+#[test]
+fn an_accessibility_click_opens_a_submenu_while_the_keys_have_the_highlight() {
+    let mut h = harness_dt(1.0 / 120.0);
+    rest_on_mode(&mut h);
+    key(&mut h, egui::Key::ArrowDown);
+    h.run_steps(5);
+    assert_eq!(image_submenu(&h), "none");
+    h.get_by_label_contains("Adjustments").click_accesskit();
+    h.run_steps(10);
+    assert_eq!(image_submenu(&h), "Adjustments");
 }
