@@ -634,6 +634,7 @@ fn a_text_field_outside_the_menu_keeps_its_arrows() {
     let event = egui::Event::Key { key: egui::Key::F, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::ALT };
     // The platform sends the letter as text too, in the same frame (`h.event` would give each its own).
     h.input_mut().events.extend([
+        egui::Event::Text("!".into()),
         egui::Event::ModifiersChanged(egui::Modifiers::ALT),
         event,
         egui::Event::Text("f".into()),
@@ -642,7 +643,7 @@ fn a_text_field_outside_the_menu_keeps_its_arrows() {
     h.run_steps(3);
     assert!(is_open(&h.ctx), "Alt+F opened File");
     assert!(h.ctx.text_edit_focused(), "the field kept the focus");
-    assert_eq!(h.state().1, "some text", "the F isn't typed into it");
+    assert_eq!(h.state().1, "some text!", "the F isn't typed into it, and what came before it is");
     let top = Nav::current(&h.ctx).top;
     for k in [egui::Key::ArrowLeft, egui::Key::ArrowRight] {
         h.key_press(k);

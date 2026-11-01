@@ -124,7 +124,8 @@ pub(super) fn render_level_rows(ui: &mut egui::Ui, items: &[&MenuItem], depth: u
 /// closed for the pointer stepping onto a separator. `own_look`: the row is highlighted, or the
 /// pointer is on another row of this menu ([`crate::menu_nav::Nav::elsewhere_in_menu`]), so it
 /// isn't drawn in the open-submenu style. `keyboard`: the keys have the highlight
-/// ([`crate::menu_nav::Nav::keyboard`]), so a pointer left resting on the row doesn't open it.
+/// ([`crate::menu_nav::Nav::keyboard`]), so a pointer left resting on the row doesn't open it,
+/// though a click from assistive technology does.
 fn submenu_row<R>(
     ui: &mut egui::Ui,
     title: egui::WidgetText,
@@ -144,7 +145,7 @@ fn submenu_row<R>(
     // The rect egui tests the pointer against (`SubMenu::show`), against the part that can be seen.
     let reach = response.rect.expand2(ui.spacing().item_spacing / 2.0);
     let hidden = ui.ctx().pointer_hover_pos().is_some_and(|p| reach.contains(p) && (!ui.clip_rect().contains(p) || !crate::menu_nav::on_row(response.rect, p)));
-    if (hidden || keyboard) && !open {
+    if (hidden || (keyboard && !response.clicked())) && !open {
         return (response, None);
     }
     let inner = SubMenu::new().show(ui, &response, content);
