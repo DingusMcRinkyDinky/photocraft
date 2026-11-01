@@ -156,7 +156,7 @@ impl Nav {
         if level == 0 {
             self.last_views = self.views.clone();
             self.last_rows = self.rows.iter().map(|rows| rows.iter().map(|r| r.rect).collect()).collect();
-            self.keyboard &= ui.ctx().input(|i| i.pointer.delta() == egui::Vec2::ZERO);
+            self.keyboard &= !pointer_acted(ui.ctx());
             // egui moves the focus with the arrow keys too, into a submenu beside the menu: gray rows.
             if let Some(focus) = ui.ctx().memory(|m| m.focused()).filter(|_| self.keyboard && !ui.ctx().text_edit_focused()) {
                 ui.ctx().memory_mut(|m| m.surrender_focus(focus));
@@ -182,7 +182,7 @@ impl Nav {
     /// submenu, the highlight goes back to the row it hangs from.
     fn follow_pointer(&mut self, ui: &Ui, level: usize) {
         let held = self.held_open(ui, level);
-        let moved = ui.ctx().input(|i| i.pointer.delta() != egui::Vec2::ZERO);
+        let moved = pointer_acted(ui.ctx());
         let index = self.aims.get(level).and_then(Option::as_ref).map(|a| a.index);
         let sub = self.last_views.get(level + 1).copied();
         let in_sub = ui.ctx().pointer_hover_pos().is_some_and(|p| sub.is_some_and(|v| v.contains(p)));
@@ -397,6 +397,7 @@ impl Nav {
         if follow {
             self.follow = None;
         }
+        self.level = level;
         if self.highlighted(level).is_some() {
             self.set_hi(level, None);
             r.ctx.request_repaint();
@@ -547,6 +548,11 @@ impl Nav {
             d.insert_temp(nav_id(), self);
         });
     }
+}
+
+/// Did the pointer move or a button go down this frame? Either hands the menu back from the keys.
+fn pointer_acted(ctx: &egui::Context) -> bool {
+    ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO || i.pointer.any_pressed())
 }
 
 /// Is the pointer at `p` on a row at `rect`? Its bottom edge is the next row's (rows touch), as

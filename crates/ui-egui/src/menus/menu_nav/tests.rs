@@ -1624,3 +1624,38 @@ fn left_out_of_a_submenu_stays_closed_with_the_pointer_on_its_row() {
     assert_eq!(image_submenu(&h), "none");
     assert_eq!(filled_rows(&h), vec![(0, 0)]);
 }
+
+/// A click takes the menu back from the keys too: the pointer resting on a closed submenu row, a
+/// click on it did nothing until the mouse moved.
+#[test]
+fn a_click_after_the_arrow_keys_opens_the_row_under_a_resting_pointer() {
+    let mut h = harness_dt(1.0 / 120.0);
+    let (from, ..) = rest_on_mode(&mut h);
+    key(&mut h, egui::Key::ArrowDown);
+    h.run_steps(5);
+    assert_eq!(image_submenu(&h), "none");
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        h.run_steps(5);
+    }
+    assert_eq!(image_submenu(&h), "Mode", "the click opens it");
+    assert_eq!(filled_rows(&h), vec![(0, 0)], "and the highlight is on the clicked row");
+}
+
+/// Reaching a submenu on a separator, not over a row, the arrows are in that submenu: they stepped
+/// the menu above and, doing so, closed the submenu.
+#[test]
+fn from_a_separator_in_a_submenu_the_arrows_stay_in_it() {
+    let mut h = harness_dt(1.0 / 120.0);
+    rest_on_mode(&mut h);
+    let sub = rows(&h, 1);
+    let gap = sub.windows(2).find(|w| w[1].rect.top() - w[0].rect.bottom() > 4.0).expect("a separator in Mode's submenu");
+    let on = egui::pos2(gap[0].rect.center().x, (gap[0].rect.bottom() + gap[1].rect.top()) / 2.0);
+    h.event(egui::Event::PointerMoved(on));
+    h.run_steps(5);
+    assert_eq!(image_submenu(&h), "Mode", "the pointer is in the submenu");
+    key(&mut h, egui::Key::ArrowDown);
+    h.run_steps(5);
+    assert_eq!(image_submenu(&h), "Mode", "the submenu stays open");
+    assert!(Nav::current(&h.ctx).highlighted(1).is_some(), "and the arrow moved inside it");
+}
