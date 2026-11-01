@@ -72,6 +72,7 @@ pub(super) fn help_search(ui: &mut egui::Ui, items: &[MenuItem], opening: bool, 
         ui.close();
     }
     ctx.data_mut(|d| d.insert_temp(text_id, query.clone()));
+    nav.search_text = !query.is_empty();
     if !query.trim().is_empty() {
         if results.is_empty() {
             ui.weak(crate::i18n::tr(lang, "No matching commands"));

@@ -1659,3 +1659,126 @@ fn from_a_separator_in_a_submenu_the_arrows_stay_in_it() {
     assert_eq!(image_submenu(&h), "Mode", "the submenu stays open");
     assert!(Nav::current(&h.ctx).highlighted(1).is_some(), "and the arrow moved inside it");
 }
+
+/// ← / → to the next menu light its title and no other, with the pointer left on the first title.
+/// Nothing lit the open menu's title, and egui's focus, moved by the arrow keys too, left a gray
+/// title one step behind the open menu.
+#[test]
+fn switching_menus_with_the_arrow_keys_lights_the_new_title() {
+    let mut h = harness_dt(1.0 / 120.0);
+    open(&mut h, "Image");
+    for (k, title) in [(egui::Key::ArrowLeft, "Edit"), (egui::Key::ArrowLeft, "File"), (egui::Key::ArrowRight, "Edit"), (egui::Key::ArrowRight, "Image")] {
+        h.key_press(k);
+        h.run_steps(1);
+        run_until_idle(&mut h);
+        let lit: Vec<_> = ["File", "Edit", "Image", "Layer"].into_iter().filter(|t| row_fill(&h, h.get_by_label(t).rect()).is_some()).collect();
+        assert_eq!(lit, vec![title], "the open menu's title, and only that");
+    }
+}
+
+/// The pointer parked on a submenu's row doesn't stop the keys opening another: egui closes an
+/// open submenu with the pointer on another row, so only the parked row's could stay open.
+#[test]
+fn with_the_pointer_parked_the_keys_open_any_submenu() {
+    let mut h = harness_dt(1.0 / 120.0);
+    rest_on_mode(&mut h);
+    key(&mut h, egui::Key::ArrowDown);
+    h.run_steps(5);
+    key(&mut h, egui::Key::ArrowRight);
+    h.run_steps(30);
+    assert_eq!(image_submenu(&h), "Adjustments", "→ opens the row the keys are on");
+    let first = Nav::current(&h.ctx).highlighted(1).expect("the submenu's first row is lit");
+    key(&mut h, egui::Key::ArrowDown);
+    h.run_steps(30);
+    assert!(Nav::current(&h.ctx).highlighted(1).is_some_and(|i| i > first), "↓ moves inside it");
+    assert_eq!(image_submenu(&h), "Adjustments");
+    key(&mut h, egui::Key::ArrowLeft);
+    h.run_steps(30);
+    assert_eq!(image_submenu(&h), "none", "← closes it");
+}
+
+/// With Help's search field empty, ← / → go on to the next menu: the field held them as soon as it
+/// had the focus, so the keys could reach Help but never leave it.
+#[test]
+fn an_empty_help_search_lets_the_arrows_change_menus() {
+    let mut h = harness_dt(1.0 / 120.0);
+    open(&mut h, "Help");
+    let help = Nav::current(&h.ctx).top;
+    key(&mut h, egui::Key::ArrowLeft);
+    h.run_steps(5);
+    assert_ne!(Nav::current(&h.ctx).top, help, "← leaves Help");
+    assert_eq!(h.ctx.memory(|m| m.focused()), None, "and the field's focus goes with it");
+    key(&mut h, egui::Key::ArrowRight);
+    h.run_steps(5);
+    assert_eq!(Nav::current(&h.ctx).top, help, "→ comes back");
+    key(&mut h, egui::Key::ArrowRight);
+    h.run_steps(5);
+    assert_ne!(Nav::current(&h.ctx).top, help, "→ leaves it the other way");
+}
+
+/// A highlighted row has the arrows, also with text in Help's search field: they stayed with the
+/// field while ↓ walked the results.
+#[test]
+fn a_highlighted_row_in_help_lets_the_arrows_change_menus() {
+    let mut h = harness_dt(1.0 / 120.0);
+    open(&mut h, "Help");
+    let help = Nav::current(&h.ctx).top;
+    h.event(egui::Event::Text("lev".into()));
+    h.run_steps(3);
+    key(&mut h, egui::Key::ArrowLeft);
+    h.run_steps(5);
+    assert_eq!(Nav::current(&h.ctx).top, help, "with nothing lit, ← moves the field's cursor");
+    key(&mut h, egui::Key::ArrowDown);
+    h.run_steps(5);
+    assert!(Nav::current(&h.ctx).highlighted(0).is_some(), "a result is lit");
+    key(&mut h, egui::Key::ArrowLeft);
+    h.run_steps(5);
+    assert_ne!(Nav::current(&h.ctx).top, help, "← changes menu");
+}
+
+/// A separator clears the levels below it too, as a row does: the submenu closed behind it kept its
+/// highlight, and a scroll sliding its row back under a resting pointer reopened it with a row lit
+/// that the pointer wasn't on.
+#[test]
+fn a_separator_clears_the_highlight_of_the_submenu_below() {
+    let mut h = harness_dt(1.0 / 120.0);
+    open(&mut h, "Window");
+    let start = rows(&h, 0)[5].rect.center();
+    h.event(egui::Event::PointerMoved(start));
+    h.run_steps(5);
+    let wheel = |h: &mut Harness<'static, PhotocraftApp>, unit, y: f32| {
+        h.event(egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit,
+            delta: egui::vec2(0.0, y),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(3);
+    };
+    for _ in 0..40 {
+        wheel(&mut h, egui::MouseWheelUnit::Line, -3.0);
+    }
+    h.run_steps(60);
+    // Theme, the last submenu row, and the row below the separator under it.
+    let all = rows(&h, 0);
+    let i = all.iter().rposition(|r| r.command.is_none()).expect("a submenu row");
+    let (row, next) = (all[i].rect, all[i + 1].rect);
+    let y = (row.bottom() + next.top()) / 2.0;
+    let on_row = row.center();
+    glide(&mut h, 8, None, |t| on_row - egui::vec2(20.0 * (1.0 - t), 0.0));
+    h.run_steps(40);
+    // Into the submenu, at the separator's height, and straight back onto the separator.
+    let inside = egui::pos2(rows(&h, 1)[0].rect.center().x, y);
+    glide(&mut h, 12, None, |t| on_row + (inside - on_row) * t);
+    h.run_steps(10);
+    assert!(Nav::current(&h.ctx).highlighted(1).is_some(), "a row of the submenu is lit");
+    let on = egui::pos2(row.center().x, y);
+    glide(&mut h, 12, None, |t| inside + (on - inside) * t);
+    h.run_steps(60);
+    assert_eq!(Nav::current(&h.ctx).highlighted(1), None, "nothing stays lit behind the separator");
+    wheel(&mut h, egui::MouseWheelUnit::Line, 1.0);
+    h.run_steps(20);
+    assert_eq!(open_submenu_row(&h), Some(i), "the scroll brings the row back under the pointer");
+    assert_eq!(filled_rows(&h).iter().filter(|(level, _)| *level == 1).count(), 0, "with nothing in it lit");
+}

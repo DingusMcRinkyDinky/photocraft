@@ -106,6 +106,8 @@ pub struct Nav {
     follow: Option<usize>,
     /// The keys moved the highlight, and the pointer hasn't moved since.
     keyboard: bool,
+    /// Help's search field has text this frame.
+    pub(crate) search_text: bool,
 }
 
 fn nav_id() -> Id {
@@ -129,7 +131,12 @@ impl Nav {
         let mut nav: Nav = ctx.data(|d| d.get_temp(nav_id())).unwrap_or_default();
         let top = nav.tops.iter().position(|id| egui::Popup::is_id_open(ctx, *id));
         if top != nav.top {
-            nav = Nav { top, tops: std::mem::take(&mut nav.tops), ..Default::default() };
+            nav = Nav { top, tops: std::mem::take(&mut nav.tops), keyboard: nav.keyboard && top.is_some(), ..Default::default() };
+        }
+        // egui moves the focus with the arrow keys too, along the menu titles and into a submenu
+        // beside the menu: gray rows, and a gray title one step behind the open menu.
+        if let Some(focus) = ctx.memory(|m| m.focused()).filter(|_| nav.keyboard && !ctx.text_edit_focused()) {
+            ctx.memory_mut(|m| m.surrender_focus(focus));
         }
         nav
     }
@@ -157,10 +164,6 @@ impl Nav {
             self.last_views = self.views.clone();
             self.last_rows = self.rows.iter().map(|rows| rows.iter().map(|r| r.rect).collect()).collect();
             self.keyboard &= !pointer_acted(ui.ctx());
-            // egui moves the focus with the arrow keys too, into a submenu beside the menu: gray rows.
-            if let Some(focus) = ui.ctx().memory(|m| m.focused()).filter(|_| self.keyboard && !ui.ctx().text_edit_focused()) {
-                ui.ctx().memory_mut(|m| m.surrender_focus(focus));
-            }
         }
         self.follow_pointer(ui, level);
         self.rows.truncate(level);
@@ -252,9 +255,15 @@ impl Nav {
             self.aims.resize(level + 1, None);
         }
         let Some(p) = r.ctx.pointer_hover_pos() else { return };
+        let sub = SubMenu::id_from_widget_id(r.id);
+        // egui closes an open submenu with the pointer on another row: the keys opened this one,
+        // and a pointer parked elsewhere doesn't undo that.
+        if self.keyboard && open == Some(sub) {
+            MenuState::from_id(&r.ctx, root, |s| s.open_item = Some(sub));
+            return;
+        }
         let was_held = self.aims.get(level).and_then(Option::as_ref).is_some_and(|a| a.row == r.id && a.held);
         let held = self.hold(level, index, root, open, p, r);
-        let sub = SubMenu::id_from_widget_id(r.id);
         if open == Some(sub) && MenuState::from_id(&r.ctx, root, |s| s.open_item) != Some(sub) {
             // Closed this frame (by egui or the hold), after it was drawn: draw the next frame
             // without it, also with the pointer resting, when nothing else asks for one.
@@ -398,6 +407,9 @@ impl Nav {
             self.follow = None;
         }
         self.level = level;
+        for deeper in self.hi.iter_mut().skip(level + 1) {
+            *deeper = None;
+        }
         if self.highlighted(level).is_some() {
             self.set_hi(level, None);
             r.ctx.request_repaint();
@@ -480,10 +492,16 @@ impl Nav {
         let Some(top) = self.top.filter(|_| !tops.is_empty()) else { return };
         let level = self.level.min(self.rows.len().saturating_sub(1));
         self.level = level;
-        // A text field in the menu (Help › Search) keeps the keys that edit it: ← / → move its
-        // cursor and Space types a space.
+        // A text field in the menu (Help › Search) keeps the keys that edit it: Space types a
+        // space, and ← / → move its cursor while it has text and no row is highlighted.
         let typing = ctx.text_edit_focused();
-        let press = |k: Key| !(typing && matches!(k, Key::ArrowLeft | Key::ArrowRight | Key::Space)) && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, k));
+        let cursor = typing && self.search_text && self.hi.iter().all(Option::is_none);
+        let held = |k: Key| match k {
+            Key::ArrowLeft | Key::ArrowRight => cursor,
+            Key::Space => typing,
+            _ => false,
+        };
+        let press = |k: Key| !held(k) && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, k));
         let current = self.highlighted(level).and_then(|i| self.rows.get(level)?.get(i)).cloned();
         let switch = |by: usize| {
             let n = tops.len();
