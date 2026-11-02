@@ -634,6 +634,7 @@ fn a_text_field_outside_the_menu_keeps_its_arrows() {
     let event = egui::Event::Key { key: egui::Key::F, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::ALT };
     // The platform sends the letter as text too, in the same frame (`h.event` would give each its own).
     h.input_mut().events.extend([
+        egui::Event::Key { key: egui::Key::F, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE },
         egui::Event::Text("!".into()),
         egui::Event::ModifiersChanged(egui::Modifiers::ALT),
         event,

@@ -365,7 +365,7 @@ impl Keys {
         {
             // The letter comes as text too, right after its key: a focused field isn't to type it.
             ctx.input_mut(|i| {
-                let at = i.events.iter().position(|e| matches!(e, Event::Key { key: k, pressed: true, .. } if *k == key));
+                let at = i.events.iter().position(|e| matches!(e, Event::Key { key: k, pressed: true, modifiers, .. } if *k == key && modifiers.alt));
                 if let Some(text) = at.map(|at| at + 1).filter(|next| matches!(i.events.get(*next), Some(Event::Text(_)))) {
                     i.events.remove(text);
                 }
